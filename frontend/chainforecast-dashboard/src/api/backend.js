@@ -73,3 +73,46 @@ export async function loginWithEmail(email, password) {
   });
   return handleResponse(res);
 }
+
+// ==== CSV Upload and Pipeline ====
+
+export async function uploadCSVFile(file) {
+  /**
+   * Upload a CSV file and trigger the full ML pipeline
+   * Returns summary of generated artifacts
+   */
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE}/api/upload-csv`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  if (data.status && data.status !== "success") {
+    throw new Error(data.message || "Failed to upload CSV");
+  }
+
+  return data;
+}
+
+export async function runPipeline() {
+  /**
+   * Run the ML pipeline on the default CSV
+   */
+  const res = await fetch(`${API_BASE}/api/run-pipeline`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+    },
+  });
+  return handleResponse(res);
+}

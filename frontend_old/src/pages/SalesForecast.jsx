@@ -12,7 +12,7 @@ function SalesForecast() {
   const [totalForecast, setTotalForecast] = useState(
     statsCards[1]?.value || "₹13,20,000"
   );
-  const [modelAccuracy, setModelAccuracy] = useState("—");
+  const [modelAccuracy, setModelAccuracy] = useState("92%");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -121,7 +121,7 @@ function SalesForecast() {
                 </div>
                 <div className="font-semibold text-slate-900 dark:text-slate-100">
                   {/* show runtime modelAccuracy (falls back to placeholder if "—") */}
-                  {modelAccuracy === "—" ? "94%" : modelAccuracy}
+                  {modelAccuracy === "92%" ? "94%" : modelAccuracy}
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/80 px-3 py-2">

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import StatsCard from "../components/StatsCard";
 import ForecastChart from "../components/ForecastChart";
 import SegmentsChart from "../components/SegmentsChart";
+import { uploadCSVFile, fetchForecastSummary, fetchSegmentsSummary } from "../api/backend";
 import {
   statsCards as defaultStatsCards,
   weeklySalesData as defaultWeeklySalesData,
@@ -26,203 +27,261 @@ function Overview() {
   const [weeklyData, setWeeklyData] = useState(defaultWeeklySalesData);
 
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const fileInputRef = useRef(null);
 
   const [segmentData, setSegmentData] = useState(defaultCustomerSegmentsData);
   const [totalCustomers, setTotalCustomers] = useState(null);
 
-  useEffect(() => {
-    async function fetchDashboardData() {
-      try {
-        // 1) Forecast summary for KPIs + line chart
-        const resForecast = await fetch(`${API_BASE_URL}/api/forecast-summary`);
-        const dataForecast = await resForecast.json();
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      // 1) Forecast summary for KPIs + line chart
+      const resForecast = await fetch(`${API_BASE_URL}/api/forecast-summary`);
+      const dataForecast = await resForecast.json();
 
-        if (dataForecast.status === "success") {
-          const apiWeekly = Array.isArray(dataForecast.weeklySalesData)
-            ? dataForecast.weeklySalesData
-            : [];
+      if (dataForecast.status === "success") {
+        const apiWeekly = Array.isArray(dataForecast.weeklySalesData)
+          ? dataForecast.weeklySalesData
+          : [];
 
-          // -------- Line chart data --------
-          setWeeklyData(apiWeekly.length ? apiWeekly : defaultWeeklySalesData);
+        // -------- Line chart data --------
+        setWeeklyData(apiWeekly.length ? apiWeekly : defaultWeeklySalesData);
 
-          // -------- KPI #1: Total Sales (Last 4 Weeks) --------
-          const last4 = apiWeekly.slice(-4);
-          const totalSalesNum = last4.reduce(
+        // -------- KPI #1: Total Sales (Last 4 Weeks) --------
+        const last4 = apiWeekly.slice(-4);
+        const totalSalesNum = last4.reduce(
+          (sum, d) => sum + (Number(d.actual) || 0),
+          0
+        );
+
+        const totalSalesFormatted =
+          totalSalesNum > 0
+            ? `₹${Math.round(totalSalesNum).toLocaleString("en-IN")}`
+            : "₹0";
+
+        // % growth vs previous 4 weeks (if we have >= 8 data points)
+        let totalSalesChangeText = "---";
+        if (apiWeekly.length >= 8) {
+          const prev4 = apiWeekly.slice(-8, -4);
+          const prevSalesNum = prev4.reduce(
             (sum, d) => sum + (Number(d.actual) || 0),
             0
           );
-
-          const totalSalesFormatted =
-            totalSalesNum > 0
-              ? `₹${Math.round(totalSalesNum).toLocaleString("en-IN")}`
-              : "₹0";
-
-          // % growth vs previous 4 weeks (if we have >= 8 data points)
-          let totalSalesChangeText = "---";
-          if (apiWeekly.length >= 8) {
-            const prev4 = apiWeekly.slice(-8, -4);
-            const prevSalesNum = prev4.reduce(
-              (sum, d) => sum + (Number(d.actual) || 0),
-              0
-            );
-            if (prevSalesNum > 0) {
-              const growth =
-                ((totalSalesNum - prevSalesNum) / prevSalesNum) * 100;
-              const sign = growth > 0 ? "+" : growth < 0 ? "" : "";
-              totalSalesChangeText = `${sign}${growth.toFixed(1)}%`;
-            }
-          }
-
-          // -------- KPI #2: Forecasted Sales (Next 4 Weeks) --------
-          const forecastFormatted =
-            dataForecast.total_forecast_formatted || "₹0";
-
-          const totalForecastNum =
-            typeof dataForecast.total_forecast === "number"
-              ? dataForecast.total_forecast
-              : null;
-
-          let forecastChangeText = "---";
-          if (totalForecastNum != null && totalSalesNum > 0) {
+          if (prevSalesNum > 0) {
             const growth =
-              ((totalForecastNum - totalSalesNum) / totalSalesNum) * 100;
+              ((totalSalesNum - prevSalesNum) / prevSalesNum) * 100;
             const sign = growth > 0 ? "+" : growth < 0 ? "" : "";
-            forecastChangeText = `${sign}${growth.toFixed(1)}%`;
+            totalSalesChangeText = `${sign}${growth.toFixed(1)}%`;
           }
-
-          // -------- Update KPI cards #1 and #2 (fully runtime) --------
-          setStats((prev) =>
-            prev.map((card) => {
-              if (card.id === 1) {
-                return {
-                  ...card,
-                  value: totalSalesFormatted,
-                  change: totalSalesChangeText,
-                  changeLabel: "vs previous 4 weeks",
-                };
-              }
-              if (card.id === 2) {
-                return {
-                  ...card,
-                  value: forecastFormatted,
-                  change: forecastChangeText,
-                  changeLabel: "vs last 4 weeks",
-                };
-              }
-              return card;
-            })
-          );
         }
 
-        // 2) Segments summary for pie chart + Total Customers + Top Segment
-        const resSegments = await fetch(
-          `${API_BASE_URL}/api/segments-summary`
+        // -------- KPI #2: Forecasted Sales (Next 4 Weeks) --------
+        const forecastFormatted =
+          dataForecast.total_forecast_formatted || "₹0";
+
+        const totalForecastNum =
+          typeof dataForecast.total_forecast === "number"
+            ? dataForecast.total_forecast
+            : null;
+
+        let forecastChangeText = "---";
+        if (totalForecastNum != null && totalSalesNum > 0) {
+          const growth =
+            ((totalForecastNum - totalSalesNum) / totalSalesNum) * 100;
+          const sign = growth > 0 ? "+" : growth < 0 ? "" : "";
+          forecastChangeText = `${sign}${growth.toFixed(1)}%`;
+        }
+
+        // -------- Update KPI cards #1 and #2 (fully runtime) --------
+        setStats((prev) =>
+          prev.map((card) => {
+            if (card.id === 1) {
+              return {
+                ...card,
+                value: totalSalesFormatted,
+                change: totalSalesChangeText,
+                changeLabel: "vs previous 4 weeks",
+              };
+            }
+            if (card.id === 2) {
+              return {
+                ...card,
+                value: forecastFormatted,
+                change: forecastChangeText,
+                changeLabel: "vs last 4 weeks",
+              };
+            }
+            return card;
+          })
         );
-        const dataSegments = await resSegments.json();
-
-        if (
-          dataSegments.status === "success" &&
-          Array.isArray(dataSegments.segments)
-        ) {
-          // -------- Pie chart data --------
-          const segData = dataSegments.segments.map((s) => ({
-            name: s.name,
-            value: s.value,
-          }));
-          setSegmentData(segData.length ? segData : defaultCustomerSegmentsData);
-
-          // -------- Base metrics from backend --------
-          const totalCustomersCount =
-            Array.isArray(dataSegments.customers) &&
-            dataSegments.customers.length > 0
-              ? dataSegments.customers.length
-              : null;
-
-          setTotalCustomers(totalCustomersCount);
-
-          let topSegmentName = null;
-          let topSegmentCount = null;
-
-          if (segData.length > 0) {
-            const topSeg = segData.reduce((a, b) =>
-              b.value > a.value ? b : a
-            );
-            topSegmentName = topSeg.name;
-            topSegmentCount = topSeg.value;
-          }
-
-          // High-value segments for KPI #3 change (Champions, Loyal, Potential)
-          let pctHighValue = null;
-          if (totalCustomersCount && totalCustomersCount > 0) {
-            const highValueNames = [
-              "Champions",
-              "Loyal Customers",
-              "Potential Loyalists",
-            ];
-            const highValueCount = segData
-              .filter((s) => highValueNames.includes(s.name))
-              .reduce((sum, s) => sum + (s.value || 0), 0);
-            pctHighValue = (highValueCount / totalCustomersCount) * 100;
-          }
-
-          // Top segment share for KPI #4 change
-          let pctTopSegment = null;
-          if (
-            totalCustomersCount &&
-            totalCustomersCount > 0 &&
-            topSegmentCount != null
-          ) {
-            pctTopSegment = (topSegmentCount / totalCustomersCount) * 100;
-          }
-
-          // -------- Update KPI #3 and #4 (fully runtime) --------
-          setStats((prev) =>
-            prev.map((card) => {
-              // Total Customers card (id 3)
-              if (card.id === 3 && totalCustomersCount != null) {
-                const formattedTotal =
-                  totalCustomersCount.toLocaleString("en-IN");
-                return {
-                  ...card,
-                  value: formattedTotal,
-                  change:
-                    pctHighValue != null
-                      ? `${pctHighValue.toFixed(1)}%`
-                      : "---",
-                  changeLabel: "in high-value segments",
-                };
-              }
-
-              // Top Segment card (id 4)
-              if (card.id === 4 && topSegmentName) {
-                return {
-                  ...card,
-                  value: topSegmentName,
-                  change:
-                    pctTopSegment != null
-                      ? `${pctTopSegment.toFixed(1)}%`
-                      : "---",
-                  changeLabel: "of total customers",
-                };
-              }
-
-              return card;
-            })
-          );
-        }
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error);
-        // Fallback to mock data if backend fails completely
-        setWeeklyData(defaultWeeklySalesData);
-        setSegmentData(defaultCustomerSegmentsData);
-        setStats(defaultStatsCards);
-      } finally {
-        setLoading(false);
       }
-    }
 
+      // 2) Segments summary for pie chart + Total Customers + Top Segment
+      const resSegments = await fetch(
+        `${API_BASE_URL}/api/segments-summary`
+      );
+      const dataSegments = await resSegments.json();
+
+      if (
+        dataSegments.status === "success" &&
+        Array.isArray(dataSegments.segments)
+      ) {
+        // -------- Pie chart data --------
+        const segData = dataSegments.segments.map((s) => ({
+          name: s.name,
+          value: s.value,
+        }));
+        setSegmentData(segData.length ? segData : defaultCustomerSegmentsData);
+
+        // -------- Base metrics from backend --------
+        const totalCustomersCount =
+          Array.isArray(dataSegments.customers) &&
+          dataSegments.customers.length > 0
+            ? dataSegments.customers.length
+            : null;
+
+        setTotalCustomers(totalCustomersCount);
+
+        let topSegmentName = null;
+        let topSegmentCount = null;
+
+        if (segData.length > 0) {
+          const topSeg = segData.reduce((a, b) =>
+            b.value > a.value ? b : a
+          );
+          topSegmentName = topSeg.name;
+          topSegmentCount = topSeg.value;
+        }
+
+        // High-value segments for KPI #3 change (Champions, Loyal, Potential)
+        let pctHighValue = null;
+        if (totalCustomersCount && totalCustomersCount > 0) {
+          const highValueNames = [
+            "Champions",
+            "Loyal Customers",
+            "Potential Loyalists",
+          ];
+          const highValueCount = segData
+            .filter((s) => highValueNames.includes(s.name))
+            .reduce((sum, s) => sum + (s.value || 0), 0);
+          pctHighValue = (highValueCount / totalCustomersCount) * 100;
+        }
+
+        // Top segment share for KPI #4 change
+        let pctTopSegment = null;
+        if (
+          totalCustomersCount &&
+          totalCustomersCount > 0 &&
+          topSegmentCount != null
+        ) {
+          pctTopSegment = (topSegmentCount / totalCustomersCount) * 100;
+        }
+
+        // -------- Update KPI #3 and #4 (fully runtime) --------
+        setStats((prev) =>
+          prev.map((card) => {
+            // Total Customers card (id 3)
+            if (card.id === 3 && totalCustomersCount != null) {
+              const formattedTotal =
+                totalCustomersCount.toLocaleString("en-IN");
+              return {
+                ...card,
+                value: formattedTotal,
+                change:
+                  pctHighValue != null
+                    ? `${pctHighValue.toFixed(1)}%`
+                    : "---",
+                changeLabel: "in high-value segments",
+              };
+            }
+
+            // Top Segment card (id 4)
+            if (card.id === 4 && topSegmentName) {
+              return {
+                ...card,
+                value: topSegmentName,
+                change:
+                  pctTopSegment != null
+                    ? `${pctTopSegment.toFixed(1)}%`
+                    : "---",
+                changeLabel: "of total customers",
+              };
+            }
+
+            return card;
+          })
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+      // Fallback to mock data if backend fails completely
+      setWeeklyData(defaultWeeklySalesData);
+      setSegmentData(defaultCustomerSegmentsData);
+      setStats(defaultStatsCards);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file is CSV
+    if (!file.name.endsWith('.csv')) {
+      setUploadStatus({
+        type: 'error',
+        message: '❌ Please upload a valid CSV file'
+      });
+      setTimeout(() => setUploadStatus(null), 5000);
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setUploadStatus({
+        type: 'loading',
+        message: '📤 Uploading CSV and running ML pipeline...'
+      });
+
+      const result = await uploadCSVFile(file);
+
+      setUploadStatus({
+        type: 'success',
+        message: '✅ CSV processed successfully! Refreshing dashboard...'
+      });
+
+      // Refresh dashboard data after a short delay
+      setTimeout(() => {
+        fetchDashboardData();
+        setUploadStatus(null);
+      }, 2000);
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadStatus({
+        type: 'error',
+        message: `❌ Upload failed: ${error.message}`
+      });
+      setTimeout(() => setUploadStatus(null), 5000);
+    } finally {
+      setUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
   return (
     <div className="space-y-6 text-slate-900 dark:text-slate-100">
@@ -238,6 +297,26 @@ function Overview() {
           </p>
         </div>
       </div>
+
+      {/* Upload Status Messages */}
+      {uploadStatus && (
+        <div className={`rounded-3xl border px-4 py-3 text-sm flex items-center gap-3 shadow-sm ${
+          uploadStatus.type === 'loading' ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900 dark:bg-blue-900/20' :
+          uploadStatus.type === 'success' ? 'border-green-200 bg-green-50/70 dark:border-green-900 dark:bg-green-900/20' :
+          'border-red-200 bg-red-50/70 dark:border-red-900 dark:bg-red-900/20'
+        }`}>
+          {uploadStatus.type === 'loading' && (
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          )}
+          <p className={`font-medium ${
+            uploadStatus.type === 'loading' ? 'text-blue-700 dark:text-blue-100' :
+            uploadStatus.type === 'success' ? 'text-green-700 dark:text-green-100' :
+            'text-red-700 dark:text-red-100'
+          }`}>
+            {uploadStatus.message}
+          </p>
+        </div>
+      )}
 
       {/* Optional inline "loading" info – this does NOT block clicks */}
       {loading && (
@@ -294,6 +373,28 @@ function Overview() {
           <button className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100">
             Last 4 weeks
           </button>
+
+          {/* CSV Upload Button */}
+          <button
+            onClick={handleUploadClick}
+            disabled={uploading}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium shadow-sm transition-all ${
+              uploading
+                ? 'bg-gray-400 text-white cursor-not-allowed'
+                : 'border border-indigo-500 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-400 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50'
+            }`}
+          >
+            {uploading ? '⏳ Uploading...' : '📤 Upload CSV'}
+          </button>
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleFileChange}
+            className="hidden"
+          />
         </div>
       </div>
 

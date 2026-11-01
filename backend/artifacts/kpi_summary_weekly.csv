@@ -1,2 +1,2 @@
-Report Date,Dataset,Prev 4 weeks total,Last 4 weeks total,Next 4 weeks (LSTM),Change (last vs prev),Change (next vs last),Accuracy
-2025-11-23 07:47:58,online_retail.csv,934904.34,951330.37,719876.1875,1.76%,-24.33%,95.00%
+prev4_total,last4_total,next4_total_lstm,pct_last_vs_prev,pct_next_vs_last
+934904.34,951312.37,1095364.5,1.7550490780693164,15.142463668374248
